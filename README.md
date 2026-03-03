@@ -1,4 +1,4 @@
-# ✈️ SkyGuard GPWS for GeoFS
+# ✈️ *GPWS Sounds** for GeoFS
 
 ![GeoFS Addon](https://img.shields.io/badge/GeoFS-Addon-blue?style=for-the-badge)
 [![Version](https://img.shields.io/badge/Version-4.0-green?style=for-the-badge)](https://github.com/Jafar20130315/GPWSsounds_geofs/blob/main/gpwssounds_release.user.js)
