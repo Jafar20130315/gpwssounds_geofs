@@ -158,5 +158,33 @@
 
     setInterval(mainLoop, 200);
     setInterval(injectButton, 1000);
+   
+    // 1. Tugma bosilishini tinglash (Event Listener)
+document.addEventListener('keydown', function(e) {
+    
+    // 2. Q tugmasi bosilganini tekshirish (Kichik yoki katta 'q')
+    if (e.key.toLowerCase() === 'q') {
+        
+        // 3. O'zgaruvchini teskarisiga o'zgartirish (Toggle)
+        soundsEnabled = !soundsEnabled;
+        
+        // 4. Agar o'chirilgan bo'lsa, hamma ovozlarni darhol to'xtatish
+        if (!soundsEnabled) {
+            stopAll();
+        } else {
+            // Agar yoqilgan bo'lsa, brauzer ovozlarni bloklamasligi uchun aktivlashtirish
+            [...Object.values(AUDIO), ...Object.values(CALLOUTS)].forEach(a => {
+                let p = a.play();
+                if(p) p.then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+            });
+        }
+
+        // 5. Pastdagi tugma (UI) vizual holatini ham yangilab qo'yish
+        injectButton();
+        
+        // 6. Konsolda nima bo'lganini ko'rsatish (Tekshirish uchun)
+        console.log("GPWS is now: " + (soundsEnabled ? "ON" : "OFF"));
+    }
+});
 
 })();
