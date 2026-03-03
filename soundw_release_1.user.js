@@ -4,6 +4,7 @@
 // @version      2.5
 // @description  Improved GPWS with priority logic and UI fix
 // @match        https://www.geo-fs.com/geofs.php*
+// @match        https://*.geo-fs.com/geofs.php*
 // @grant        none
 // ==/UserScript==
 
