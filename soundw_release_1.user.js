@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GeoFS Advanced GPWS + Alerts (Optimized)
+// @name         GPWS sounds, GeoFS.
 // @namespace    geofs.gpws.jafar
-// @version      2.5
-// @description  Improved GPWS with priority logic and UI fix
+// @version      3.5
+// @description  Hear a warning sounds, it helps you to fly carefully.
 // @match        https://www.geo-fs.com/geofs.php*
 // @match        https://*.geo-fs.com/geofs.php*
 // @grant        none
@@ -11,15 +11,25 @@
 (function() {
     "use strict";
 
-    const GW = window;
+    const ICON_URL = "https://cdn-icons-png.flaticon.com/512/2800/2800000.png";
 
-    // ================= AUDIO FILES =================
+    // 1. SUVGA QO'NUVCHI SAMOLYOTLAR RO'YXATI
+    // Agar boshqa samolyotlarni ham qo'shmoqchi bo'lsangiz, nomini shu yerga yozing
+    const WATER_PLANES = [
+        "Canadair CL-415", 
+        "DHC-6 Twin Otter", 
+        "Cessna 172 (Floats)", 
+        "Hughes H-4 Hercules",
+        "Icon A5"
+    ];
+
     const AUDIO = {
         stall: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/airbus-stall-warning.mp3"),
         pull: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/terrain-terrain-pull-up.mp3"),
         sink: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/sink-rate.mp3"),
         gear: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/too-low-gear.mp3"),
-        overspeed: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/overspeed.mp3")
+        overspeed: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/overspeed.mp3"),
+        bank: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/bank-angle.mp3")
     };
 
     const CALLOUTS = {
@@ -27,9 +37,6 @@
         500: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/500.mp3"),
         100: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/100.mp3"),
         50: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/50.mp3"),
-        40: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/40.mp3"),
-        30: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/30.mp3"),
-        20: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/20.mp3"),
         10: new Audio("https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/10.mp3")
     };
 
@@ -37,51 +44,32 @@
     let lastAltitude = 99999;
     let activeWarning = null;
 
-    // ================= UI SETUP (Top Right) =================
-    // UI ni yuqori menyuga qo'shish
-    const uiContainer = document.createElement("div");
-    uiContainer.id = "gpws-ui-refined";
-    uiContainer.style = `
-        position: fixed;
-        top: 10px;
-        right: 60px; 
-        background: rgba(0, 0, 0, 0.8);
-        color: #00ff00;
-        padding: 5px 15px;
-        border-radius: 5px;
-        font-family: 'Courier New', monospace;
-        font-size: 11px;
-        z-index: 10000;
-        border: 1px solid #444;
-        display: flex;
-        gap: 10px;
-        align-items: center;
-    `;
-    uiContainer.innerHTML = `
-        <span id="gpws-info">GPWS OFF</span>
-        <button id="enableSound" style="background:#444; color:white; border:none; cursor:pointer; padding:2px 5px; border-radius:3px;">ENABLE</button>
-    `;
-    document.body.appendChild(uiContainer);
+    // ================= UI SETUP =================
+    function createUI() {
+        const bottomBar = document.querySelector(".geofs-ui-bottom");
+        if (!bottomBar || document.getElementById("gpws-bottom-icon")) return;
 
-    document.getElementById("enableSound").onclick = function() {
-        soundsEnabled = true;
-        this.innerText = "GPWS ON";
-        this.style.background = "#006600";
-        // Audio contextni aktivlashtirish
-        Object.values(AUDIO).forEach(a => { a.play().then(() => { a.pause(); a.currentTime = 0; }); });
-    };
+        const uiBtn = document.createElement("div");
+        uiBtn.id = "gpws-bottom-icon";
+        uiBtn.style = "display:inline-block; vertical-align:middle; margin-left:10px; cursor:pointer; transition:0.3s; opacity:0.5; filter:grayscale(100%);";
+        uiBtn.innerHTML = `<img src="${ICON_URL}" width="24" height="24" style="vertical-align:middle;"> <span id="gpws-txt" style="color:white; font-size:10px; font-family:Arial;">OFF</span>`;
+        
+        bottomBar.appendChild(uiBtn);
 
-    // ================= HELPERS =================
-    function ready() { return GW.geofs?.animation?.values && GW.geofs?.aircraft?.instance; }
-    function val(n) { return GW.geofs.animation.values[n] || 0; }
-    
+        uiBtn.onclick = () => {
+            soundsEnabled = !soundsEnabled;
+            uiBtn.style.opacity = soundsEnabled ? "1" : "0.5";
+            uiBtn.style.filter = soundsEnabled ? "none" : "grayscale(100%)";
+            document.getElementById("gpws-txt").innerText = soundsEnabled ? "ON" : "OFF";
+            if(soundsEnabled) Object.values(AUDIO).forEach(a => { a.play().then(()=> {a.pause(); a.currentTime=0;}).catch(()=>{}); });
+        };
+    }
+
     function playAlert(type) {
         if (!soundsEnabled) return;
-        // Agar muhimroq signal chalinayotgan bo'lsa, boshqasini kutib turamiz
         if (activeWarning && activeWarning !== type && !AUDIO[activeWarning].paused) return;
-        
         activeWarning = type;
-        if (AUDIO[type].paused) AUDIO[type].play();
+        if (AUDIO[type].paused) AUDIO[type].play().catch(()=>{});
     }
 
     function stopAlert(type) {
@@ -93,64 +81,64 @@
     }
 
     // ================= MAIN LOOP =================
-    setInterval(() => {
-        if (!ready()) return;
+    function mainLoop() {
+        if (!window.geofs?.animation?.values || !window.geofs?.aircraft?.instance) return;
 
-        let alt = Math.round(val("altitude") - val("groundElevationFeet"));
-        let vs = Math.round(val("verticalSpeed"));
-        let spd = Math.round(val("kias"));
-        let gear = val("gearPosition") === 1;
-        let ground = val("groundContact") === 1;
-        let stall = GW.geofs.aircraft.instance.stalling;
+        let aircraftName = window.geofs.aircraft.instance.definition.name;
+        let values = window.geofs.animation.values;
+        let alt = Math.round(values.altitude - values.groundElevationFeet);
+        let vs = Math.round(values.verticalSpeed);
+        let roll = Math.abs(values.roll);
+        let gearIsDown = values.gearPosition > 0.5; 
+        let ground = values.groundContact === 1;
+        let stall = window.geofs.aircraft.instance.stalling;
 
-        document.getElementById("gpws-info").innerHTML = `ALT: ${alt} | VS: ${vs} | SPD: ${spd}`;
+        // 2. SUV SAMOLYOTINI TEKSHIRISH
+        let isWaterPlane = WATER_PLANES.some(name => aircraftName.includes(name));
 
         if (ground) {
-            Object.values(AUDIO).forEach(a => { a.pause(); a.currentTime = 0; });
+            Object.values(AUDIO).forEach(stopAlert);
             return;
         }
 
-        // --- PRIORITY LOGIC ---
-        
-        // 1. STALL (Eng yuqori prioritet)
-        if (stall) {
-            playAlert('stall');
-        } else {
+        // Warnings logic
+        if (stall) playAlert('stall');
+        else {
             stopAlert('stall');
-
-            // 2. PULL UP (Yerga yaqin va VS juda katta)
-            // Logic: 1500 futdan pastda va VS juda xavfli bo'lsa
-            if (alt < 1500 && vs < -3500 || (alt < 500 && vs < -2500)) {
-                playAlert('pull');
-            } else {
+            if (alt < 1000 && vs < -3000) playAlert('pull');
+            else {
                 stopAlert('pull');
-
-                // 3. SINK RATE
-                if (alt < 2500 && vs < -2000) {
-                    playAlert('sink');
-                } else {
-                    stopAlert('sink');
-                }
+                if (alt < 2500 && vs < -2000) playAlert('sink');
+                else stopAlert('sink');
             }
         }
 
-        // TOO LOW GEAR (Mustaqil signal)
-        if (alt < 500 && !gear && vs < -100) playAlert('gear');
-        else stopAlert('gear');
+        if (roll > 35) playAlert('bank'); else stopAlert('bank');
 
-        // OVERSPEED
-        if (spd > 350) playAlert('overspeed');
-        else stopAlert('overspeed');
+        // --- SMART GEAR LOGIC ---
+        // Agar samolyot suvga qo'nuvchi bo'lsa, Gear signali butunlay o'chiriladi
+        if (!isWaterPlane && alt < 500 && alt > 30 && !gearIsDown) {
+            playAlert('gear');
+        } else {
+            stopAlert('gear');
+        }
 
-        // --- CALLOUTS ---
+        // Callouts
         for (let h in CALLOUTS) {
             let height = parseInt(h);
             if (alt <= height && lastAltitude > height) {
-                if (soundsEnabled) CALLOUTS[h].play();
+                if (soundsEnabled) CALLOUTS[h].play().catch(()=>{});
             }
         }
-        
         lastAltitude = alt;
-    }, 200);
+    }
+
+    let checkReady = setInterval(() => {
+        if (window.geofs && window.geofs.animation) {
+            createUI();
+            setInterval(mainLoop, 200);
+            clearInterval(checkReady);
+        }
+    }, 1000);
 
 })();
