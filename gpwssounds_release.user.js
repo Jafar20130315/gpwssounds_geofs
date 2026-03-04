@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GPWS sounds, GeoFS.
 // @namespace    geofs.gpws.jafar
-// @version      4.8
-// @description  Full Sound Pack with Audio Unlocker. Press 'Q' or Click Button.
+// @version      5.0
+// @description  Pro-grade GPWS. Improved Stall logic, Priority Alerts, and Fast Reaction.
 // @match        https://www.geo-fs.com/geofs.php*
 // @match        https://*.geo-fs.com/geofs.php*
 // @grant        none
@@ -16,7 +16,7 @@
     const ICON_URL = "https://cdn-icons-png.flaticon.com/512/2800/2800000.png";
     const AUDIO_BASE = "https://raw.githubusercontent.com/avramovic/geofs-alerts/master/audio/";
 
-    // 1. Ovozlar ro'yxati
+    // 1. OVOZLARNI YUKLASH
     const AUDIO = {
         stall: new Audio(AUDIO_BASE + "airbus-stall-warning.mp3"),
         whoop: new Audio(AUDIO_BASE + "terrain-terrain-pull-up.mp3"),
@@ -31,16 +31,9 @@
         CALLOUTS[h] = new Audio(AUDIO_BASE + h + ".mp3");
     });
 
-    // 2. OVOZLARNI "UYG'OTISH" (Browser Unlock)
-    function unlockAudio() {
-        console.log("GPWS: Unlocking audio...");
-        [...Object.values(AUDIO), ...Object.values(CALLOUTS)].forEach(sound => {
-            sound.play().then(() => {
-                sound.pause();
-                sound.currentTime = 0;
-            }).catch(e => console.warn("Audio unlock failed: ", e));
-        });
-    }
+    // Ovozlar cheksiz aylanib turishi uchun (Stall va Whoop uchun muhim)
+    AUDIO.stall.loop = true;
+    AUDIO.overspeed.loop = true;
 
     function stopAll() {
         [...Object.values(AUDIO), ...Object.values(CALLOUTS)].forEach(a => { a.pause(); a.currentTime = 0; });
@@ -48,15 +41,22 @@
 
     function toggleGPWS() {
         soundsEnabled = !soundsEnabled;
-        if (soundsEnabled) {
-            unlockAudio(); // Birinchi marta yoqilganda barcha ovozlarni ruxsatdan o'tkazadi
-        } else {
+        if (!soundsEnabled) {
             stopAll();
+        } else {
+            // Ovozni "uyg'otish"
+            Object.values(AUDIO).forEach(a => { let p = a.play(); if(p) p.then(()=> {a.pause(); a.currentTime=0;}).catch(()=>{}); });
         }
         updateUI();
     }
 
-    // 3. UI (TUGMA)
+    // 2. KLAVIATURA [Q]
+    document.addEventListener('keydown', (e) => {
+        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+        if (e.key.toLowerCase() === 'q') toggleGPWS();
+    });
+
+    // 3. UI (TUGMA) - Xavfsiz rejimda
     function updateUI() {
         const bar = document.querySelector(".geofs-ui-bottom");
         if (!bar) return;
@@ -84,13 +84,7 @@
                          GPWS ${soundsEnabled ? 'ON' : 'OFF'} [Q]</span>`;
     }
 
-    // 4. KLAVIATURA
-    document.addEventListener('keydown', (e) => {
-        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-        if (e.key.toLowerCase() === 'q') toggleGPWS();
-    });
-
-    // 5. ASOSIY MANTIQ (MAIN LOOP)
+    // 4. ASOSIY MANTIQ (MAIN LOOP) - Sekundiga 10 marta tekshirish
     function mainLoop() {
         if (!window.geofs?.animation?.values || !soundsEnabled) return;
         if (document.querySelector(".geofs-replay-container")) return;
@@ -100,35 +94,46 @@
             const alt = Math.round(v.altitude - v.groundElevationFeet);
             const vs = v.verticalSpeed;
             const roll = Math.abs(v.roll);
+            const aoa = v.aoa; // Angle of Attack
+            const kias = v.kias;
+            const ground = v.groundContact === 1;
 
-            if (v.groundContact === 1) { stopAll(); return; }
+            if (ground) { stopAll(); return; }
 
-            // --- STALL ---
-            if (window.geofs.aircraft?.instance?.stalling) {
+            // --- PRIORITY 1: STALL ---
+            // Samolyot stalling holatida bo'lsa YOKI tezlik juda past va burni juda yuqori bo'lsa
+            const isStalling = window.geofs.aircraft?.instance?.stalling || (aoa > 18 && kias < 120);
+
+            if (isStalling) {
                 if (AUDIO.stall.paused) AUDIO.stall.play();
+                // Stall vaqtida boshqa ogohlantirishlarni to'xtatish (Prioritet)
+                AUDIO.whoop.pause(); AUDIO.sink.pause();
             } else {
                 AUDIO.stall.pause(); AUDIO.stall.currentTime = 0;
-            }
 
-            // --- WHOOP WHOOP (PULL UP) ---
-            if (alt < 1000 && vs < -3200) {
-                if (AUDIO.whoop.paused) AUDIO.whoop.play();
-            } else {
-                AUDIO.whoop.pause(); AUDIO.whoop.currentTime = 0;
-                // SINK RATE
-                if (alt < 2500 && vs < -2100) {
-                    if (AUDIO.sink.paused) AUDIO.sink.play();
+                // --- PRIORITY 2: WHOOP WHOOP PULL UP ---
+                if (alt < 1000 && vs < -3500) {
+                    if (AUDIO.whoop.paused) AUDIO.whoop.play();
                 } else {
-                    AUDIO.sink.pause(); AUDIO.sink.currentTime = 0;
+                    AUDIO.whoop.pause(); AUDIO.whoop.currentTime = 0;
+
+                    // --- PRIORITY 3: SINK RATE ---
+                    if (alt < 2500 && vs < -2200) {
+                        if (AUDIO.sink.paused) AUDIO.sink.play();
+                    } else {
+                        AUDIO.sink.pause(); AUDIO.sink.currentTime = 0;
+                    }
                 }
             }
 
-            // --- BANK ANGLE ---
-            if (roll > 35) {
-                if (AUDIO.bank.paused) AUDIO.bank.play();
+            // --- BANK ANGLE & OVERSPEED (Parallel ogohlantirishlar) ---
+            if (roll > 40) { if (AUDIO.bank.paused) AUDIO.bank.play(); }
+            else { AUDIO.bank.pause(); AUDIO.bank.currentTime = 0; }
+
+            if (kias > (window.geofs.aircraft?.instance?.definition?.vne || 450)) {
+                if (AUDIO.overspeed.paused) AUDIO.overspeed.play();
             } else {
-                AUDIO.bank.pause(); AUDIO.bank.currentTime = 0;
-            }
+                AUDIO.overspeed.pause(); AUDIO.overspeed.currentTime = 0; }
 
             // --- CALLOUTS ---
             for (let h in CALLOUTS) {
@@ -142,7 +147,9 @@
         } catch (err) { }
     }
 
-    setInterval(mainLoop, 250);
-    setInterval(updateUI, 2000);
+    // Taymerlarni sozlash
+    setInterval(mainLoop, 100); 
+    setInterval(updateUI, 1500);
     setTimeout(updateUI, 5000);
+
 })();
