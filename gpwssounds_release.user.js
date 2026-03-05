@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Altis GeoFS
 // @namespace    https://jafaras.uz/
-// @version      8.1
+// @version      8.2
 // @description  Warning sounds for GeoFS.
 // @match        https://www.geo-fs.com/geofs.php*
 // @match        https://*.geo-fs.com/geofs.php*
+// @author       Jafar_AS
+// @icon          https
 // @grant        none
 // ==/UserScript==
 
@@ -14,9 +16,10 @@
     let soundsEnabled = false;
     let lastAltitude = 99999;
     let currentPriority = 0;
-    let activeKey = null;      // hozir chalayotgan ovoz kaliti
+    let activeKey = null;      
     let activeAudio = null;
     let preloaded = false;
+    let lastAutopilotState = false; // Avtopilot holatini saqlash uchun
 
     const RAW_URL = "https://raw.githubusercontent.com/avramovic/GeoFS-alerts/7fc27f444cc167fb588cd28afebff0526e7c53c7/audio/";
 
@@ -60,22 +63,19 @@
         mins:       { audio: null, p: 2, loop: false },
         appMins:    { audio: null, p: 2, loop: false },
         hundredAbove:{ audio: null, p: 2, loop: false },
-        autopilotOff:{ audio: null, p: 2, loop: false },
-        autopilotOn:{ audio: null, p: 2, loop: false }
+        autopilotOff:{ audio: null, p: 10, loop: false }, // AP uchun yuqori prioritet
+        autopilotOn:{ audio: null, p: 10, loop: false }
     };
 
-    // Callouts (heights):  key = height number -> { audio:null, p:1 }
     const CALLOUTS = {};
     [2500, 2000, 1500, 1000, 500, 400, 300, 200, 100, 50, 40, 30, 20, 10].forEach(h => {
         CALLOUTS[h] = { audio: null, p: 1, filename: h + ".mp3" };
     });
 
-    // PRELOAD: fetch barcha audiolarni blob qilib, keyga Audio yarating.
     async function preloadAllAudio() {
         if (preloaded) return;
         const tasks = [];
 
-        // SOUNDS
         for (const key in SOUND_FILES) {
             const filename = SOUND_FILES[key];
             const url = RAW_URL + filename;
@@ -87,18 +87,12 @@
                 const a = new Audio(blobUrl);
                 a.preload = "auto";
                 a.crossOrigin = "anonymous";
-                if (SOUNDS[key]) {
-                    SOUNDS[key].audio = a;
-                } else {
-                    // safety
-                    SOUNDS[key] = { audio: a, p: 1, loop: false };
-                }
+                if (SOUNDS[key]) SOUNDS[key].audio = a;
             }).catch(err => {
                 console.warn("Audio preload failed for", filename, err);
             }));
         }
 
-        // CALLOUTS
         for (const h in CALLOUTS) {
             const filename = CALLOUTS[h].filename;
             const url = RAW_URL + filename;
@@ -116,26 +110,18 @@
             }));
         }
 
-        // Barchasini kut
         await Promise.all(tasks);
         preloaded = true;
-        console.log("GPWS: all audio preload attempted");
+        console.log("GPWS: All audio correctly loaded.");
     }
 
-    // Play-safe: endi activeKey orqali tekshiradi
     function playSafe(soundKey, isCallout = false) {
         const soundObj = isCallout ? CALLOUTS[soundKey] : SOUNDS[soundKey];
-        if (!soundObj || !soundObj.audio) {
-            // audio yo'q bo'lsa, sinab ko'rish uchun preload qayta boshlash
-            console.warn("GPWS: audio not ready for", soundKey);
-            return;
-        }
+        if (!soundObj || !soundObj.audio) return;
 
         const prio = soundObj.p ?? 1;
 
-        // Agar yangi ovozning prioriteti baland yoki hozir hech nima chalmas ekan
         if (prio > currentPriority || !activeAudio || activeAudio.paused) {
-            // Agar hozir loop ovoz bo'lsa yoki boshqa ovoz bo'lsa, to'xtat
             if (activeAudio) {
                 try { activeAudio.pause(); } catch(e) {}
                 try { activeAudio.currentTime = 0; } catch(e) {}
@@ -148,19 +134,14 @@
 
             if (soundObj.loop) activeAudio.loop = true;
 
-            // play va error handling
             const p = activeAudio.play();
             if (p && p.catch) {
                 p.catch(err => {
-                    console.warn("GPWS: play() failed for", soundKey, err);
                     currentPriority = 0;
                     activeKey = null;
                 });
-            } else {
-                // no promise (old browsers) - ignore
             }
 
-            // qaytadan o'rnatish
             if (!soundObj.loop) {
                 activeAudio.onended = () => {
                     if (activeKey === soundKey || (activeKey && activeKey.startsWith("callout_") && activeKey.endsWith(soundKey))) {
@@ -175,7 +156,6 @@
     function stopAll() {
         if (activeAudio) {
             try { activeAudio.pause(); activeAudio.currentTime = 0; } catch(e){}
-            // remove loop flag for previously looping
             if (activeKey && SOUNDS[activeKey]) SOUNDS[activeKey].audio && (SOUNDS[activeKey].audio.loop = false);
         }
         currentPriority = 0;
@@ -183,53 +163,28 @@
         activeAudio = null;
     }
 
-    // Gear detection: turli geoFS versiyalar uchun per-heuristic tekshiradi.
-    // Return: true = gear down, false = gear up (retracted), null = unknown
-    function gearIsDown(values, aircraftInstance) {
+    // Yaxshilangan Gear Detection (Shassi tekshiruvi)
+    function gearIsDown(v, ac) {
         try {
-            // 1) animation.values may have gearPosition (0..1). Biz mappingni avtomatik aniqlashga harakat qilamiz:
-            if (typeof values.gearPosition === "number") {
-                // Heuristika: agar qiymat 0 yoki 1 bo'lsa - tekshir
-                if (values.gearPosition === 0 || values.gearPosition === 1) {
-                    // Ba'zi versiyalarda 1 = down, ba'zilarida 1 = up. Aniqlash uchun hozirgi altitudega qarab faraz qilamiz:
-                    // Agar yerga yaqin va gearPosition === 1 => ehtimol down.
-                    if (values.altitude - (values.groundElevationFeet || 0) < 200) {
-                        // yaqin - deb =1 => down
-                        return values.gearPosition === 1 ? true : false;
-                    } else {
-                        // balandlikda 1 => ehtimol up
-                        return values.gearPosition === 1 ? false : true;
-                    }
-                } else {
-                    // qiymat 0..1 orasida - > 0.5 deb down deb hisoblaymiz (ko'pchilikda shunday)
-                    return values.gearPosition > 0.5;
-                }
+            // Agar umuman shassi ma'lumoti bo'lmasa, demak bu Cessna 172 kabi doim ochiq shassili samolyot (Fixed gear).
+            if (typeof v.gearTarget === "undefined" && typeof v.gearPosition === "undefined" && typeof v.gear === "undefined") {
+                return true; 
             }
+            
+            // Retractable gear (yig'iladigan shassilar) uchun tekshiruv
+            if (typeof v.gearTarget === "number") return v.gearTarget === 1; // 1 = down
+            if (typeof v.gearPosition === "number") return v.gearPosition > 0.5; // o'rta holatdan pastda bo'lsa
+            if (typeof v.gear === "boolean") return v.gear;
 
-            // 2) aircraftInstance may have landingGear or gear state
-            if (aircraftInstance && typeof aircraftInstance.landingGear !== "undefined") {
-                const lg = aircraftInstance.landingGear;
-                // possible properties: deployed (bool), position (0..1), down (bool)
-                if (typeof lg.deployed === "boolean") return lg.deployed;
-                if (typeof lg.down === "boolean") return lg.down;
-                if (typeof lg.position === "number") return lg.position > 0.5;
-            }
-
-            // 3) sometimes values.gear (boolean) exists
-            if (typeof values.gear === "boolean") return values.gear;
-
-            // Agar hech narsa topilmasa: unknown
-            return null;
+            return true; // Xavfsizlik uchun doim ochiq deb qabul qilamiz
         } catch (e) {
-            console.warn("GPWS: gearIsDown error", e);
-            return null;
+            return true;
         }
     }
 
-    // ASOSIY LOOP
     function mainLoop() {
         if (!window.geofs || !window.geofs.animation || !window.geofs.animation.values || !soundsEnabled) return;
-        if (document.querySelector(".geofs-replay-container")) return; // replay rejimida ovoz bermaymiz
+        if (document.querySelector(".geofs-replay-container")) return; 
 
         try {
             const v = window.geofs.animation.values;
@@ -240,28 +195,38 @@
 
             if (v.groundContact === 1) { stopAll(); lastAltitude = alt; return; }
 
+            // Avtopilot holatini tekshirish
+            const apOn = (ac && ac.autopilot && ac.autopilot.on) ? true : false;
+            if (apOn && !lastAutopilotState) { playSafe('autopilotOn'); }
+            if (!apOn && lastAutopilotState) { playSafe('autopilotOff'); }
+            lastAutopilotState = apOn;
+
             // Stall
             const isStall = (ac && ac.stalling) || (typeof v.aoa === "number" && v.aoa > 18 && kias < 110);
             if (isStall) { playSafe('stall'); lastAltitude = alt; return; }
             else if (activeKey === 'stall') { stopAll(); }
 
-            // Whoop / sink
+            // Whoop / Sink
             if (alt < 1000 && vs < -3800) { playSafe('whoop'); }
             else if (alt < 2500 && vs < -2200) { playSafe('sink'); }
 
-            // Configuration: gear/flaps - foydalanish uchun gearIsDown aniq false bo'lishi talab qilinadi
-            const gearDown = gearIsDown(v, ac); // true/false/null
+            // Gear & Flaps
+            const gearDown = gearIsDown(v, ac); 
+            const flapsValue = typeof v.flapsPosition === "number" ? v.flapsPosition : (typeof v.flapsTarget === "number" ? v.flapsTarget : (typeof v.flapsValue === "number" ? v.flapsValue : 1));
 
-            // Too Low Gear: chalish faqat agar aniq ma'lumot bo'lib gear retracted (false)
+            // Too Low Gear (faqat aniq yig'ilgan bo'lsa chaladi)
             if (alt < 500 && alt > 50 && gearDown === false) { playSafe('tooLowGear'); }
 
-            // Too Low Flaps: chalish faqat agar aniq ma'lumot mavjud va flaps juda kichik
-            if (alt < 200 && alt > 50 && gearDown === true && typeof v.flapsValue === "number" && v.flapsValue < 0.1) { playSafe('tooLowFlaps'); }
+            // Too Low Flaps
+            if (alt < 200 && alt > 50 && gearDown === true && flapsValue < 0.1) { playSafe('tooLowFlaps'); }
 
             // Minimums
             if (alt <= 305 && lastAltitude > 305) playSafe('appMins');
             if (alt <= 205 && lastAltitude > 205) playSafe('mins');
             if (alt <= 100 && lastAltitude > 100) playSafe('hundredAbove');
+
+            // Retard (Yerdan 20ft balandda, agar dvigatel quvvati tushirilmagan bo'lsa)
+            if (alt <= 20 && lastAltitude > 20 && v.throttle > 0.1) playSafe('retard');
 
             // Callouts
             for (let h in CALLOUTS) {
@@ -271,8 +236,9 @@
                 }
             }
 
-            // Bank angle
-            if (typeof v.roll === "number" && Math.abs(v.roll) > 45) { playSafe('bank'); }
+            // Bank angle - TO'G'RILANGAN! GeoFS da roll qiymati v.aroll da o'lchanadi.
+            const rollValue = typeof v.aroll === "number" ? v.aroll : (typeof v.roll === "number" ? v.roll : 0);
+            if (Math.abs(rollValue) > 45) { playSafe('bank'); }
 
             lastAltitude = alt;
         } catch (e) {
@@ -280,16 +246,12 @@
         }
     }
 
-    // UI: toggle + preload har clickda bajarilsin
     function toggleGPWS() {
         soundsEnabled = !soundsEnabled;
         updateUI();
         if (soundsEnabled) {
-            // preloading boshlash va Audio unlock uchun foydalanuvchi actioni (click) kerak
             preloadAllAudio().then(() => {
-                // audiolarni tez sinab ko'rish: kichik oynatda past hajmda
                 try {
-                    // o'ynatib darhol to'xtatish orqali unlock qilishga harakat
                     for (const k in SOUNDS) {
                         const s = SOUNDS[k];
                         if (s && s.audio) {
@@ -304,12 +266,10 @@
         }
     }
 
-    // Q tugmasi bilan ham ochish
     document.addEventListener('keydown', (e) => {
         if (e.key && e.key.toLowerCase() === 'q') toggleGPWS();
     });
 
-    // updateUI: tugma qo'shadi (foydalanuvchi bosishi kerak)
     function updateUI() {
         const bar = document.querySelector(".geofs-ui-bottom");
         if (!bar) return;
@@ -335,11 +295,46 @@
         `;
         btn.innerText = soundsEnabled ? 'GPWS: ACTIVE (click to disable)' : 'GPWS: OFF (click to enable)';
     }
+    // updateUI: tugma va yangi logotip qo'shadi
+function updateUI() {
+    const bar = document.querySelector(".geofs-ui-bottom");
+    if (!bar) return;
+    let btn = document.getElementById("gpws-v8-btn-fixed") || document.createElement("div");
+    if (!btn.id) {
+        btn.id = "gpws-v8-btn-fixed";
+        btn.onclick = toggleGPWS;
+        bar.appendChild(btn);
+    }
+    btn.style.cssText = `
+        display:inline-flex; /* Logotip va matnni bir qatorga tekislash */
+        align-items:center;  /* Vertikal tekislash */
+        margin-left:10px;
+        cursor:pointer;
+        padding:6px 12px;
+        border-radius:6px;
+        background:${soundsEnabled ? 'rgba(0,200,0,0.2)' : 'rgba(255,255,255,0.06)'};
+        color:#fff;
+        font-family:sans-serif;
+        font-size:12px;
+        font-weight:700;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+        transition: background 0.3s;
+    `;
 
-    // Start intervals
+    // Yangi Logotip URL manzili (bu yerda tasvir generatsiya qilinganidan keyin hosil bo'lgan URL bo'lishi kerak)
+    const logoUrl = "https://github.com/"; 
+
+    const statusText = soundsEnabled ? 'Altis: ACTIVE' : 'Altis: OFF';
+    const clickAction = soundsEnabled ? ' (click to disable)' : ' (click to enable)';
+
+    btn.innerHTML = `
+        <img src="${logoUrl}" alt="Altis Logo" style="height:16px; width:16px; margin-right:8px; display:inline-block; vertical-align:middle;">
+        <span>${statusText}<span style="font-weight:400; opacity:0.7;">${clickAction}</span></span>
+    `;
+}
+
     setInterval(mainLoop, 150);
     setInterval(updateUI, 2000);
 
-    // Small console hint
-    console.log("GPWS script loaded. Press [Q] or click GPWS button below UI to enable sounds (first click will preload & unlock audio).");
+    console.log("GPWS Fixed Script loaded. Press [Q] to activate.");
 })();
