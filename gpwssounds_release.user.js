@@ -221,8 +221,8 @@
         }
         
         const logoUrl = "https://raw.githubusercontent.com/Jafar20130315/gpwssounds_geofs/refs/heads/main/Altis-icon.png";  
-        const statusText = soundsEnabled ? 'Altis: ACTIVE' : 'Altis: OFF';
-        const clickAction = soundsEnabled ? ' (disable)' : ' (enable)';
+        const statusText = soundsEnabled ? 'GPWS sounds on' : 'GPWS sounds off';
+        const clickAction = soundsEnabled ? ' [Q]' : '[Q]';
 
         btn.style.cssText = `
             display:inline-flex;
