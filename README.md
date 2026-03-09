@@ -25,18 +25,18 @@ A professional-grade **Ground Proximity Warning System (GPWS)** for GeoFS. This 
 ## 🚀 Installation
 
 ### Prerequisites
-1.  Install the [Tampermonkey](https://www.tampermonkey.net/) extension for your browser.
+1.  Install the [Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) extension for your browser.
 
 ### Setup Steps
 1.  Click on the `gpwssounds_release.user.js` file in this repository.
 2.  Click the **Raw** button.
-3.  Tampermonkey will automatically detect the script; click **Install**.
-4.  Refresh GeoFS and look for the aircraft icon in the bottom menu.
+3.  Tampermonkey will automatically detect the script (if don't works, turn off the Antivirus); click **Install**.
+4.  Refresh GeoFS and look for the aircraft icon in the bottom menu (if don't works go to extension settings and allow to scripts).
 
 ---
 
 ## 🛠️ How to Use
-1.  Once in-game, click the **GPWS icon** in the bottom bar.
+1.  Once in-game, click the **GPWS icon** in the bottom bar or tap [Q].
 2.  The indicator will turn **Green (GPWS ON)**.
 3.  The system will perform a silent "audio warm-up" on the first click to bypass browser autoplay restrictions.
 4.  Fly safely! The system will handle the rest.
